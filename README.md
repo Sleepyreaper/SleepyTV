@@ -125,13 +125,24 @@ On sleepycore, prerequisites: Docker + Dockge, **nvidia-container-toolkit**
 (for NVENC), and **cifs-utils** (for the SMB mount).
 
 1. Put this folder on sleepycore (git clone or copy) — it becomes a Dockge stack.
-2. `cp .env.example .env` and fill in your NAS username/password (used only to
-   mount the media share; **you** enter these, they aren't stored in the repo).
+2. `cp .env.example .env` and set:
+   - your **NAS username/password** (used only to mount the media share;
+     **you** enter these, they aren't stored in the repo), and
+   - **`SLEEPYTV_HOST_PORT`** — 8080 is taken on sleepycore, so pick a free host
+     port (default `8899`). Find used ports with
+     `docker ps --format 'table {{.Names}}\t{{.Ports}}'` or `ss -tlnp | grep LISTEN`.
 3. In Dockge, add the stack and **Deploy**. It builds `sleepytv` (no
    dependencies) and runs `jellyfin` with GPU passthrough.
-   - SleepyTV → `http://sleepycore:8080` (browser UI + M3U/XMLTV) — add it to
-     your dashboard/reverse proxy like your other apps.
+   - SleepyTV → `http://sleepytv.sleepycore:8899` (browser UI + M3U/XMLTV).
    - Jellyfin → `http://sleepycore:8096`.
+
+   To use the friendly name, add a **hosts-file** entry on each client machine:
+   ```
+   <sleepycore-IP>   sleepytv.sleepycore
+   ```
+   (A hosts entry maps the name to an IP only — you still include the port, e.g.
+   `sleepytv.sleepycore:8899`. If you run a reverse proxy that routes by
+   hostname, you can drop the port; tell me which proxy and I'll add labels.)
 
 > The media share mounts read-only, so **Plex keeps working** — Jellyfin just
 > reads the same files and builds its own metadata.
@@ -178,8 +189,9 @@ add a Jellyfin API key.
 **Homarr:** add each as a manual app —
 - Jellyfin → `http://sleepycore:8096` (Homarr has a built-in Jellyfin integration
   for a live widget).
-- SleepyTV → `http://sleepycore:8080`, ping URL `http://sleepycore:8080/healthz`
-  (shows the tile online once the guide has loaded).
+- SleepyTV → `http://sleepytv.sleepycore:8899`, ping URL
+  `http://sleepytv.sleepycore:8899/healthz` (shows the tile online once the guide
+  has loaded).
 
 The **healthcheck** on `sleepytv` turns the container green in Dockge once the
 channel list is loaded (~10s after start).

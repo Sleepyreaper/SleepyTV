@@ -18,7 +18,11 @@ services:
     container_name: sleepytv
     restart: unless-stopped
     ports:
-      - "8080:8080"          # browser UI + M3U/XMLTV/proxy; add to your dashboard
+      # host:container. Container is always 8080 inside; the HOST port is what
+      # you browse to. 8080 is taken on sleepycore, so set SLEEPYTV_HOST_PORT in
+      # .env to a free port (default 8899). Jellyfin's tuner still uses the
+      # internal name http://sleepytv:8080 and is unaffected by this.
+      - "${SLEEPYTV_HOST_PORT:-8899}:8080"
     environment:
       - SLEEPYTV_CACHE_DIR=/cache
     volumes:
@@ -35,7 +39,7 @@ services:
       - homepage.group=Media
       - homepage.name=SleepyTV
       - homepage.icon=jellyfin.png
-      - homepage.href=http://sleepycore:8080
+      - homepage.href=http://sleepytv.sleepycore:${SLEEPYTV_HOST_PORT:-8899}
       - homepage.description=Free live TV guide (IPTV) + Jellyfin tuner
 
   jellyfin:
