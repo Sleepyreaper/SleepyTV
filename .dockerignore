@@ -1,0 +1,6 @@
+data_cache.json
+epg_cache.json
+.claude
+.git
+.env
+*.md

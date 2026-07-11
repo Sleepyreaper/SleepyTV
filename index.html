@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SleepyTV &middot; TV Guide</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+<style>
+  :root{
+    --bg:#0b1020; --bg2:#0f1630; --panel:#141c38; --panel2:#1b2547;
+    --line:#26315c; --text:#eaf0ff; --muted:#8ea0cf; --accent:#7c5cff;
+    --accent2:#38d6c4; --hot:#ff5d73; --live:#3ddc84; --now:#ffd166;
+    --shadow:0 10px 30px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, #1a2350 0%, transparent 60%),
+      radial-gradient(900px 500px at 90% 0%, #22184a 0%, transparent 55%),
+      var(--bg);
+    color:var(--text); min-height:100vh;
+  }
+  a{color:inherit}
+
+  /* Header */
+  header{
+    position:sticky; top:0; z-index:40; backdrop-filter:blur(12px);
+    background:linear-gradient(180deg, rgba(11,16,32,.92), rgba(11,16,32,.72));
+    border-bottom:1px solid var(--line);
+  }
+  .bar{max-width:1500px; margin:0 auto; padding:12px 20px; display:flex;
+    align-items:center; gap:14px; flex-wrap:wrap}
+  .brand{display:flex; align-items:center; gap:10px; font-weight:800;
+    font-size:20px; letter-spacing:.3px; white-space:nowrap}
+  .brand .moon{font-size:22px; filter:drop-shadow(0 0 8px var(--accent))}
+  .brand b{background:linear-gradient(90deg,var(--accent),var(--accent2));
+    -webkit-background-clip:text; background-clip:text; color:transparent}
+  .tabs{display:flex; background:var(--panel); border:1px solid var(--line);
+    border-radius:12px; padding:3px}
+  .tabs button{border:none; background:transparent; color:var(--muted);
+    padding:8px 14px; border-radius:9px; cursor:pointer; font-size:14px;
+    font-weight:700; display:flex; align-items:center; gap:6px}
+  .tabs button.active{background:var(--accent); color:#fff}
+  .search{flex:1; min-width:200px; position:relative}
+  .search input{
+    width:100%; padding:11px 14px 11px 40px; border-radius:12px;
+    border:1px solid var(--line); background:var(--panel); color:var(--text);
+    font-size:15px; outline:none; transition:border .15s, box-shadow .15s;
+  }
+  .search input:focus{border-color:var(--accent);
+    box-shadow:0 0 0 3px rgba(124,92,255,.25)}
+  .search .ic{position:absolute; left:13px; top:50%; transform:translateY(-50%);
+    color:var(--muted)}
+  select{
+    padding:10px 12px; border-radius:12px; border:1px solid var(--line);
+    background:var(--panel); color:var(--text); font-size:14px; outline:none;
+    max-width:180px;
+  }
+  select:focus{border-color:var(--accent)}
+  .count{color:var(--muted); font-size:13px; white-space:nowrap}
+  /* 18+ toggle */
+  .adult{display:flex; align-items:center; gap:8px; cursor:pointer;
+    font-size:13px; color:var(--muted); user-select:none; white-space:nowrap}
+  .adult .sw{width:38px; height:22px; border-radius:999px; background:var(--panel2);
+    border:1px solid var(--line); position:relative; transition:background .15s}
+  .adult .sw::after{content:""; position:absolute; top:2px; left:2px; width:16px;
+    height:16px; border-radius:50%; background:var(--muted); transition:.15s}
+  .adult.on .sw{background:var(--hot); border-color:var(--hot)}
+  .adult.on .sw::after{left:18px; background:#fff}
+  .adult.on{color:var(--hot)}
+
+  /* Layout */
+  main{max-width:1500px; margin:0 auto; padding:22px 20px 80px}
+  .section-title{display:flex; align-items:center; gap:10px; margin:26px 4px 12px;
+    font-size:18px; font-weight:700}
+  .section-title .pill{font-size:11px; font-weight:700; padding:3px 8px;
+    border-radius:999px; text-transform:uppercase; letter-spacing:.6px}
+  .pill.live{background:rgba(61,220,132,.15); color:var(--live);
+    border:1px solid rgba(61,220,132,.35)}
+  .pill.hot{background:rgba(255,93,115,.15); color:var(--hot);
+    border:1px solid rgba(255,93,115,.35)}
+
+  /* Hero spotlight */
+  .hero{
+    position:relative; border-radius:20px; overflow:hidden; margin-top:6px;
+    border:1px solid var(--line); background:var(--panel); box-shadow:var(--shadow);
+    display:grid; grid-template-columns:auto 1fr; gap:22px; align-items:center;
+    padding:26px 28px;
+  }
+  .hero::before{content:""; position:absolute; inset:0;
+    background:radial-gradient(600px 300px at 12% 20%, rgba(124,92,255,.25), transparent 60%),
+               radial-gradient(500px 260px at 95% 90%, rgba(56,214,196,.18), transparent 60%);
+    pointer-events:none}
+  .hero .logo{width:120px; height:120px; border-radius:18px; background:#fff;
+    display:flex; align-items:center; justify-content:center; overflow:hidden;
+    box-shadow:var(--shadow); z-index:1}
+  .hero .logo img{max-width:100%; max-height:100%; object-fit:contain}
+  .hero .logo .initials{color:#111}
+  .hero .info{z-index:1; min-width:0}
+  .hero .live-dot{display:inline-flex; align-items:center; gap:7px;
+    color:var(--live); font-weight:700; font-size:13px; letter-spacing:.4px}
+  .hero .live-dot i{width:9px; height:9px; border-radius:50%; background:var(--live);
+    box-shadow:0 0 0 0 rgba(61,220,132,.6); animation:pulse 1.8s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(61,220,132,.6)}
+    70%{box-shadow:0 0 0 12px rgba(61,220,132,0)}
+    100%{box-shadow:0 0 0 0 rgba(61,220,132,0)}}
+  .hero h1{margin:8px 0 6px; font-size:30px; line-height:1.15; overflow-wrap:anywhere}
+  .hero .meta{color:var(--muted); font-size:14px; margin-bottom:6px}
+  .hero .nowline{color:var(--now); font-size:14px; font-weight:600; margin:2px 0 16px;
+    min-height:20px}
+  .btn{
+    display:inline-flex; align-items:center; gap:9px; cursor:pointer;
+    border:none; border-radius:12px; padding:12px 20px; font-size:15px;
+    font-weight:700; color:#fff;
+    background:linear-gradient(90deg,var(--accent),#9d7bff);
+    box-shadow:0 8px 20px rgba(124,92,255,.35); transition:transform .12s, filter .12s;
+  }
+  .btn:hover{transform:translateY(-1px); filter:brightness(1.08)}
+  .btn.ghost{background:var(--panel2); color:var(--text);
+    box-shadow:none; border:1px solid var(--line)}
+
+  /* Rails */
+  .rail{position:relative}
+  .rail-scroll{display:flex; gap:14px; overflow-x:auto; padding:6px 4px 14px;
+    scroll-behavior:smooth; scrollbar-width:thin}
+  .rail-scroll::-webkit-scrollbar{height:8px}
+  .rail-scroll::-webkit-scrollbar-thumb{background:var(--line); border-radius:8px}
+  .rail-scroll .card{flex:0 0 210px}
+
+  /* Grid */
+  .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
+    gap:14px}
+
+  /* Card */
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    overflow:hidden; cursor:pointer; transition:transform .12s, border-color .12s,
+    box-shadow .12s; display:flex; flex-direction:column;
+  }
+  .card:hover{transform:translateY(-3px); border-color:var(--accent);
+    box-shadow:var(--shadow)}
+  .thumb{position:relative; aspect-ratio:16/10; background:
+    linear-gradient(135deg,#1a2246,#131a34); display:flex; align-items:center;
+    justify-content:center; overflow:hidden}
+  .thumb img{max-width:78%; max-height:70%; object-fit:contain}
+  .thumb .initials{font-size:34px; font-weight:800; color:#fff; opacity:.85}
+  .thumb .badges{position:absolute; top:8px; left:8px; right:8px;
+    display:flex; justify-content:space-between; align-items:flex-start}
+  .badge{font-size:11px; font-weight:700; padding:3px 7px; border-radius:8px;
+    background:rgba(0,0,0,.55); backdrop-filter:blur(4px)}
+  .badge.q{color:var(--accent2)}
+  .badge.live{color:#fff; background:rgba(255,93,115,.9);
+    display:inline-flex; align-items:center; gap:5px}
+  .badge.live i{width:6px; height:6px; border-radius:50%; background:#fff}
+  .badge.adult{color:#fff; background:rgba(255,60,90,.95)}
+  .card .body{padding:11px 12px 13px}
+  .card .name{font-weight:700; font-size:14px; line-height:1.25;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+    overflow:hidden; min-height:35px}
+  .card .sub{margin-top:6px; color:var(--muted); font-size:12px;
+    display:flex; align-items:center; gap:6px; flex-wrap:wrap}
+  .chip{background:var(--panel2); border:1px solid var(--line); border-radius:7px;
+    padding:2px 7px; font-size:11px}
+  .card .epg{margin-top:9px; font-size:12px; min-height:0}
+  .card .epg .np{color:var(--now); font-weight:600; display:-webkit-box;
+    -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden}
+  .card .epg .bar{height:4px; border-radius:3px; background:var(--panel2);
+    margin-top:5px; overflow:hidden}
+  .card .epg .bar > span{display:block; height:100%; background:var(--now)}
+  .card .epg .nx{color:var(--muted); margin-top:4px; display:-webkit-box;
+    -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden}
+
+  .more{display:flex; justify-content:center; margin:28px 0 0}
+  .empty{text-align:center; color:var(--muted); padding:60px 20px}
+  .empty .big{font-size:44px; margin-bottom:10px}
+  .loading{text-align:center; padding:80px 20px; color:var(--muted)}
+  .spinner{width:38px; height:38px; border-radius:50%;
+    border:3px solid var(--line); border-top-color:var(--accent);
+    animation:spin 1s linear infinite; margin:0 auto 16px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .epgnote{color:var(--muted); font-size:12px; margin:4px 4px 0}
+
+  /* ---- Guide grid (EPG) ---- */
+  .guide-wrap{margin-top:8px}
+  .guide{overflow:auto; border:1px solid var(--line); border-radius:16px;
+    background:var(--panel); max-height:74vh; position:relative}
+  .guide-inner{position:relative}
+  .ruler{display:flex; position:sticky; top:0; z-index:6; height:36px;
+    background:var(--bg2); border-bottom:1px solid var(--line)}
+  .ruler .corner{position:sticky; left:0; z-index:7; background:var(--bg2);
+    border-right:1px solid var(--line); display:flex; align-items:center;
+    padding:0 12px; font-size:12px; font-weight:700; color:var(--muted)}
+  .ruler-track{position:relative}
+  .ruler-track .tick{position:absolute; top:0; height:36px; display:flex;
+    align-items:center; font-size:12px; color:var(--muted);
+    border-left:1px solid var(--line); padding-left:6px}
+  .grow{position:relative}
+  .guide-row{display:flex; height:66px; border-bottom:1px solid rgba(38,49,92,.5)}
+  .guide-label{position:sticky; left:0; z-index:5; background:var(--panel);
+    border-right:1px solid var(--line); display:flex; align-items:center; gap:9px;
+    padding:0 10px; cursor:pointer}
+  .guide-label:hover{background:var(--panel2)}
+  .guide-label .lg{width:40px; height:40px; border-radius:8px; background:#fff;
+    display:flex; align-items:center; justify-content:center; overflow:hidden;
+    flex:0 0 auto}
+  .guide-label .lg img{max-width:100%; max-height:100%; object-fit:contain}
+  .guide-label .lg .initials{font-size:13px; color:#111; font-weight:800}
+  .guide-label .nm{font-size:13px; font-weight:600; line-height:1.2;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+    overflow:hidden}
+  .guide-track{position:relative; flex:0 0 auto}
+  .prog{position:absolute; top:6px; bottom:6px; background:var(--panel2);
+    border:1px solid var(--line); border-radius:8px; padding:6px 8px;
+    overflow:hidden; cursor:pointer; transition:background .1s}
+  .prog:hover{background:#243066; border-color:var(--accent)}
+  .prog.now{background:linear-gradient(180deg,rgba(255,209,102,.22),rgba(255,209,102,.08));
+    border-color:var(--now)}
+  .prog .pt{font-size:12px; font-weight:600; line-height:1.2; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis}
+  .prog .ptime{font-size:11px; color:var(--muted); margin-top:2px}
+  .nowbar{position:absolute; top:0; bottom:0; width:2px; background:var(--now);
+    z-index:4; box-shadow:0 0 8px var(--now)}
+  .nowbar::before{content:"NOW"; position:absolute; top:-1px; left:2px;
+    font-size:9px; font-weight:800; color:#111; background:var(--now);
+    padding:1px 4px; border-radius:0 4px 4px 0}
+
+  /* Player modal */
+  .modal{position:fixed; inset:0; z-index:100; display:none;
+    align-items:center; justify-content:center; padding:20px;
+    background:rgba(4,7,16,.86); backdrop-filter:blur(6px)}
+  .modal.open{display:flex}
+  .player{width:min(1000px,100%); background:var(--bg2);
+    border:1px solid var(--line); border-radius:18px; overflow:hidden;
+    box-shadow:var(--shadow); max-height:94vh; display:flex; flex-direction:column}
+  .player .top{display:flex; align-items:center; gap:12px; padding:14px 16px;
+    border-bottom:1px solid var(--line)}
+  .player .top .plogo{width:38px; height:38px; border-radius:9px; background:#fff;
+    display:flex; align-items:center; justify-content:center; overflow:hidden; flex:0 0 auto}
+  .player .top .plogo img{max-width:100%; max-height:100%; object-fit:contain}
+  .player .top .plogo .initials{font-size:12px; color:#111; font-weight:800}
+  .player .top .pname{font-weight:700; font-size:16px; flex:1; min-width:0;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .player .top .live{color:var(--live); font-size:12px; font-weight:700;
+    display:inline-flex; align-items:center; gap:6px}
+  .player .top .live i{width:8px;height:8px;border-radius:50%;background:var(--live)}
+  .xbtn{background:var(--panel2); border:1px solid var(--line); color:var(--text);
+    width:38px; height:38px; border-radius:10px; cursor:pointer; font-size:18px;
+    display:flex; align-items:center; justify-content:center}
+  .xbtn:hover{border-color:var(--hot); color:var(--hot)}
+  .video-wrap{position:relative; background:#000; aspect-ratio:16/9}
+  .video-wrap video{width:100%; height:100%; display:block; background:#000}
+  .status{position:absolute; inset:0; display:none; align-items:center;
+    justify-content:center; flex-direction:column; text-align:center;
+    color:var(--muted); padding:24px; background:rgba(0,0,0,.5)}
+  .status.show{display:flex}
+  .status .big{font-size:40px; margin-bottom:12px}
+  .status .retry{margin-top:14px}
+  .pguide{padding:14px 16px; overflow-y:auto}
+  .pguide .pnow{font-size:15px; font-weight:700; color:var(--now)}
+  .pguide .ptimes{color:var(--muted); font-size:13px; margin-top:2px}
+  .pguide .pbar{height:5px; border-radius:3px; background:var(--panel);
+    margin:10px 0 4px; overflow:hidden}
+  .pguide .pbar > span{display:block; height:100%; background:var(--now)}
+  .pguide .upnext{margin-top:12px; border-top:1px solid var(--line); padding-top:10px}
+  .pguide .upnext h4{margin:0 0 8px; font-size:12px; text-transform:uppercase;
+    letter-spacing:.5px; color:var(--muted)}
+  .pguide .un-item{display:flex; gap:12px; font-size:13px; padding:4px 0}
+  .pguide .un-item .t{color:var(--muted); flex:0 0 52px}
+
+  /* Opera VPN tip banner */
+  .tip{max-width:1500px; margin:14px auto 0; padding:12px 16px;
+    display:flex; align-items:center; gap:12px; border-radius:14px;
+    border:1px solid rgba(124,92,255,.4);
+    background:linear-gradient(90deg, rgba(124,92,255,.16), rgba(56,214,196,.10));
+    color:var(--text); font-size:13.5px; line-height:1.5}
+  .tip .em{font-size:20px}
+  .tip b{color:var(--accent2)}
+  .tip .x{margin-left:auto; flex:0 0 auto; background:var(--panel2);
+    border:1px solid var(--line); color:var(--text); border-radius:9px;
+    padding:7px 12px; cursor:pointer; font-weight:700; font-size:13px}
+  .tip .x:hover{border-color:var(--accent)}
+
+  /* player region + geo hint */
+  .top .region{font-size:12px; color:var(--muted); background:var(--panel2);
+    border:1px solid var(--line); border-radius:8px; padding:4px 9px;
+    white-space:nowrap; flex:0 0 auto}
+  .status .vpnhint{margin-top:12px; max-width:440px; font-size:13.5px;
+    line-height:1.5; color:var(--text); background:rgba(124,92,255,.14);
+    border:1px solid rgba(124,92,255,.4); border-radius:12px; padding:12px 14px}
+  .status .vpnhint b{color:var(--accent2)}
+
+  footer{max-width:1500px; margin:0 auto; padding:0 20px 40px;
+    color:var(--muted); font-size:12px; line-height:1.7}
+  footer code{background:var(--panel); padding:2px 6px; border-radius:6px}
+
+  @media (max-width:640px){
+    .hero{grid-template-columns:1fr; text-align:center; padding:22px}
+    .hero .logo{margin:0 auto}
+    .hero h1{font-size:24px}
+    select{flex:1}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <div class="brand"><span class="moon">🌙</span><span>Sleepy<b>TV</b></span></div>
+    <div class="tabs">
+      <button id="tabDiscover" class="active">🧭 Discover</button>
+      <button id="tabGuide">📅 Guide</button>
+    </div>
+    <div class="search">
+      <span class="ic">🔍</span>
+      <input id="q" type="search" placeholder="Search channels…" autocomplete="off">
+    </div>
+    <select id="fCat"><option value="">All categories</option></select>
+    <select id="fCc"><option value="">All countries</option></select>
+    <label class="adult" id="adultToggle" title="Show adult (18+) channels">
+      <span class="sw"></span><span>🔞 18+</span>
+    </label>
+    <span class="count" id="count"></span>
+  </div>
+</header>
+
+<div class="tip" id="tip" style="display:none">
+  <span class="em">🛰️</span>
+  <div><b>Best in Opera:</b> turn on the free built-in VPN. Many channels are
+    geo-locked to their home country — match the region (<b>Europe · Americas ·
+    Asia</b>) and they unlock. If a stream won't play, the player tells you which
+    region to pick.</div>
+  <button class="x" id="tipClose">Got it</button>
+</div>
+
+<main id="main">
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    Tuning in… loading the channel lineup from iptv-org.
+  </div>
+
+  <!-- DISCOVER view -->
+  <div id="discover" style="display:none">
+    <div class="section-title" id="spotTitle" style="margin-top:8px">
+      <span class="pill live">● On Now</span> Tonight's spotlight
+    </div>
+    <div class="hero" id="hero"></div>
+    <div id="rails"></div>
+    <div class="section-title" id="browseTitle">📺 All channels</div>
+    <div class="grid" id="grid"></div>
+    <div class="more" id="moreWrap" style="display:none">
+      <button class="btn ghost" id="moreBtn">Load more</button>
+    </div>
+    <div class="empty" id="empty" style="display:none">
+      <div class="big">🌜</div>No channels match that search.
+    </div>
+  </div>
+
+  <!-- GUIDE view -->
+  <div id="guideView" style="display:none">
+    <div class="section-title" style="margin-top:8px">
+      <span class="pill live">● Live</span> TV Guide
+      <span class="count" id="guideCount" style="margin-left:auto"></span>
+    </div>
+    <div class="epgnote" id="guideNote">Channels with published schedules. Use the filters and search to narrow the list.</div>
+    <div class="guide-wrap">
+      <div class="guide" id="guide"></div>
+    </div>
+    <div class="more" id="guideMoreWrap" style="display:none">
+      <button class="btn ghost" id="guideMoreBtn">Load more channels</button>
+    </div>
+    <div class="empty" id="guideEmpty" style="display:none">
+      <div class="big">📭</div>No scheduled channels match. The EPG covers a subset of channels (mostly Plex, Pluto, Roku &amp; Samsung).
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div>SleepyTV plays free, publicly-available streams aggregated by
+    <a href="https://github.com/iptv-org/iptv" target="_blank" rel="noreferrer">iptv-org</a>,
+    with program schedules (EPG) where available. Streams are proxied locally
+    through <code>app.py</code> so more of them play in your browser. Many are
+    flaky, geo-restricted, or offline — that's normal for public IPTV. Nothing
+    is stored remotely; everything runs on your machine.</div>
+</footer>
+
+<!-- Player -->
+<div class="modal" id="modal">
+  <div class="player">
+    <div class="top">
+      <div class="plogo" id="pLogo"></div>
+      <div class="pname" id="pName">—</div>
+      <span class="region" id="pRegion" style="display:none"></span>
+      <span class="live"><i></i> LIVE</span>
+      <button class="xbtn" id="closeBtn" title="Close (Esc)">✕</button>
+    </div>
+    <div class="video-wrap">
+      <video id="video" controls autoplay playsinline></video>
+      <div class="status" id="status">
+        <div class="big">😴</div>
+        <div id="statusMsg">This stream isn't responding right now.</div>
+        <div class="vpnhint" id="vpnHint" style="display:none"></div>
+        <button class="btn retry" id="retryBtn">Try again</button>
+      </div>
+    </div>
+    <div class="pguide" id="pguide" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var DATA = null, ALL = [], EPG = {}, catName = {}, ccName = {}, ccVpn = {}, ccCont = {};
+  var PAGE = 60, shown = 0, filtered = [];
+  var gShown = 0, gFiltered = [], G_PAGE = 50;
+  var hls = null, current = null, triedDirect = false;
+  var view = "discover";
+  var nsfwOn = localStorage.getItem("sleepytv_nsfw") === "1";
+
+  var $ = function(id){ return document.getElementById(id); };
+
+  function flag(cc){
+    if(!cc || cc.length !== 2) return "📺";
+    var A = 0x1F1E6;
+    return String.fromCodePoint(A + cc.charCodeAt(0) - 65,
+                                A + cc.charCodeAt(1) - 65);
+  }
+  function initials(name){
+    var w = (name||"?").replace(/[^A-Za-z0-9 ]/g,"").trim().split(/\s+/);
+    return ((w[0]||"?")[0] + (w[1]? w[1][0]:"")).toUpperCase();
+  }
+  function escapeHtml(s){
+    return (s||"").replace(/[&<>"]/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; });
+  }
+  function hhmm(sec){
+    var d = new Date(sec*1000);
+    return d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+  }
+  function logoHtml(item, cls){
+    if(item.logo)
+      return '<img loading="lazy" src="'+item.logo+'" onerror="this.parentNode.innerHTML=\''+
+        '<span class=&quot;initials&quot;>'+initials(item.name)+'</span>\'">';
+    return '<span class="initials">'+initials(item.name)+'</span>';
+  }
+
+  // EPG: current + next programme for a channel id
+  function nowInfo(id){
+    var list = id && EPG[id];
+    if(!list || !list.length) return null;
+    var t = Date.now()/1000;
+    for(var i=0;i<list.length;i++){
+      var p = list[i];
+      if(p[0] <= t && t < p[1])
+        return { now:p, next:list[i+1]||null, prog:(t-p[0])/(p[1]-p[0]) };
+    }
+    for(var j=0;j<list.length;j++)
+      if(list[j][0] > t) return { now:null, next:list[j], prog:0 };
+    return null;
+  }
+
+  // ---- cards ----------------------------------------------------------
+  function card(item){
+    var el = document.createElement("div");
+    el.className = "card";
+    if(item.id) el.setAttribute("data-cid", item.id);
+    var q = item.q ? '<span class="badge q">'+item.q+'</span>' : '<span></span>';
+    var right = item.nsfw ? '<span class="badge adult">18+</span>'
+                          : '<span class="badge live"><i></i>LIVE</span>';
+    var catTxt = (item.cats && item.cats.length)
+      ? '<span class="chip">'+ (catName[item.cats[0]]||item.cats[0]) +'</span>' : "";
+    var ccTxt = item.cc ? flag(item.cc) + " " + (ccName[item.cc]||item.cc) : "🌐 Worldwide";
+    el.innerHTML =
+      '<div class="thumb">'+
+        '<div class="badges">'+q+right+'</div>'+
+        '<div class="lgwrap" style="display:contents">'+logoHtml(item)+'</div>'+
+      '</div>'+
+      '<div class="body">'+
+        '<div class="name">'+escapeHtml(item.name)+'</div>'+
+        '<div class="sub">'+catTxt+'<span>'+ccTxt+'</span></div>'+
+        '<div class="epg"></div>'+
+      '</div>';
+    decorateEpg(el, item);
+    el.addEventListener("click", function(){ openPlayer(item); });
+    return el;
+  }
+  function decorateEpg(el, item){
+    var box = el.querySelector(".epg");
+    if(!box) return;
+    var info = nowInfo(item.id);
+    if(!info || !info.now){ box.innerHTML = ""; return; }
+    box.innerHTML =
+      '<div class="np">▶ '+escapeHtml(info.now[2])+'</div>'+
+      '<div class="bar"><span style="width:'+Math.round(info.prog*100)+'%"></span></div>'+
+      (info.next ? '<div class="nx">Next: '+escapeHtml(info.next[2])+' · '+hhmm(info.next[0])+'</div>' : '');
+  }
+  function refreshEpgLines(){
+    document.querySelectorAll(".card[data-cid]").forEach(function(el){
+      var id = el.getAttribute("data-cid");
+      var item = { id:id, name:"" };
+      var box = el.querySelector(".epg");
+      var info = nowInfo(id);
+      if(!box) return;
+      if(!info || !info.now){ box.innerHTML=""; return; }
+      box.innerHTML =
+        '<div class="np">▶ '+escapeHtml(info.now[2])+'</div>'+
+        '<div class="bar"><span style="width:'+Math.round(info.prog*100)+'%"></span></div>'+
+        (info.next ? '<div class="nx">Next: '+escapeHtml(info.next[2])+' · '+hhmm(info.next[0])+'</div>' : '');
+    });
+  }
+
+  // ---- rails & hero ---------------------------------------------------
+  var RAILS = [
+    ["news","📰 News — happening now","hot"],
+    ["sports","⚽ Sports","live"],
+    ["movies","🎬 Movies","live"],
+    ["music","🎵 Music","live"],
+    ["kids","🧸 Kids","live"],
+    ["documentary","🌍 Documentary","live"],
+    ["entertainment","✨ Entertainment","live"]
+  ];
+  function visible(i){ return nsfwOn || !i.nsfw; }
+  function pickByCat(cat, n){
+    var pool = ALL.filter(function(i){ return visible(i) && i.cats.indexOf(cat) !== -1; });
+    shuffle(pool);
+    return pool.slice(0, n);
+  }
+  function shuffle(a){
+    for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));
+      var t=a[i];a[i]=a[j];a[j]=t;} return a;
+  }
+  var heroItem = null;
+  function buildHero(){
+    var pool = pickByCat("news", 40).concat(pickByCat("general", 40))
+      .filter(function(i){ return i.logo; });
+    if(!pool.length) pool = ALL.filter(function(i){return visible(i) && i.logo;});
+    if(!pool.length) pool = ALL.filter(visible);
+    heroItem = pool[Math.floor(Math.random()*pool.length)];
+    if(!heroItem) return;
+    var it = heroItem;
+    var cats = it.cats.map(function(c){return catName[c]||c;}).slice(0,3).join(" • ");
+    $("hero").innerHTML =
+      '<div class="logo">'+logoHtml(it)+'</div>'+
+      '<div class="info">'+
+        '<div class="live-dot"><i></i> LIVE NOW</div>'+
+        '<h1>'+escapeHtml(it.name)+'</h1>'+
+        '<div class="meta">'+ (it.cc? flag(it.cc)+" "+(ccName[it.cc]||it.cc)+"  ·  " : "") +
+          (cats||"Live TV") + (it.q? "  ·  "+it.q : "") +'</div>'+
+        '<div class="nowline" id="heroNow"></div>'+
+        '<button class="btn" id="heroPlay">▶  Watch now</button>'+
+        '  <button class="btn ghost" id="heroShuffle">🔀 Shuffle</button>'+
+      '</div>';
+    $("heroPlay").addEventListener("click", function(){ openPlayer(it); });
+    $("heroShuffle").addEventListener("click", buildHero);
+    updateHeroNow();
+  }
+  function updateHeroNow(){
+    if(!heroItem) return;
+    var el = $("heroNow"); if(!el) return;
+    var info = nowInfo(heroItem.id);
+    el.textContent = (info && info.now) ? "▶ Now: " + info.now[2] +
+      "  (until " + hhmm(info.now[1]) + ")" : "";
+  }
+  // marquee free channels that reliably play (great first impression)
+  var SHOWCASE = ["NASA","Red Bull TV","Al Jazeera English","DW English",
+    "France 24 English","Euronews","Bloomberg","CNA","TRT World","Africanews",
+    "NBC News Now","ABC News","Tastemade","Rakuten","Sky News"];
+  function buildShowcase(){
+    var picks = [], used = {};
+    SHOWCASE.forEach(function(nm){
+      var q = nm.toLowerCase();
+      var m = ALL.find(function(i){
+        return visible(i) && i.logo && !used[i.url] &&
+               i.name.toLowerCase().indexOf(q) >= 0; });
+      if(m){ used[m.url] = 1; picks.push(m); }
+    });
+    return picks;
+  }
+  function railSection(wrap, pillClass, pillText, title, items){
+    var t = document.createElement("div"); t.className = "section-title";
+    t.innerHTML = '<span class="pill '+pillClass+'">'+pillText+'</span>'+title;
+    var rail = document.createElement("div"); rail.className = "rail";
+    var scroll = document.createElement("div"); scroll.className = "rail-scroll";
+    items.forEach(function(it){ scroll.appendChild(card(it)); });
+    rail.appendChild(scroll); wrap.appendChild(t); wrap.appendChild(rail);
+  }
+  function buildRails(){
+    var wrap = $("rails"); wrap.innerHTML = "";
+    var show = buildShowcase();
+    if(show.length >= 3)
+      railSection(wrap, "hot", "⭐ Showcase", "Free TV that just works", show);
+    RAILS.forEach(function(r){
+      var items = pickByCat(r[0], 18);
+      if(items.length < 4) return;
+      railSection(wrap, r[2], (r[2]==="hot"?"🔥 Hot":"● Live"), r[1], items);
+    });
+  }
+
+  // ---- discover grid + filtering -------------------------------------
+  function passFilters(i){
+    var cat = $("fCat").value, cc = $("fCc").value;
+    var term = $("q").value.trim().toLowerCase();
+    if(!visible(i)) return false;
+    if(cat && i.cats.indexOf(cat) === -1) return false;
+    if(cc && i.cc !== cc) return false;
+    if(term && i.name.toLowerCase().indexOf(term) === -1) return false;
+    return true;
+  }
+  function applyFilters(){
+    if(view === "guide") return buildGuide();
+    var term = $("q").value.trim(), cat = $("fCat").value, cc = $("fCc").value;
+    filtered = ALL.filter(passFilters);
+    var searching = term || cat || cc;
+    $("rails").style.display = searching ? "none" : "";
+    $("hero").style.display = searching ? "none" : "";
+    $("spotTitle").style.display = searching ? "none" : "";
+    $("browseTitle").innerHTML = searching ? "🔍 Results" : "📺 All channels";
+    $("count").textContent = filtered.length.toLocaleString() + " channels";
+    shown = 0; $("grid").innerHTML = "";
+    $("empty").style.display = filtered.length ? "none" : "";
+    renderMore();
+  }
+  function renderMore(){
+    var frag = document.createDocumentFragment();
+    var end = Math.min(shown + PAGE, filtered.length);
+    for(var i=shown;i<end;i++) frag.appendChild(card(filtered[i]));
+    $("grid").appendChild(frag);
+    shown = end;
+    $("moreWrap").style.display = shown < filtered.length ? "" : "none";
+  }
+
+  // ---- Guide (EPG grid) ----------------------------------------------
+  var PPM = 6, LABEL_W = 210, ROW_H = 66, WINDOW_MIN = 720, PAST_MIN = 30;
+  function gridStart(){
+    var now = Date.now()/1000;
+    return Math.floor(now/1800)*1800 - PAST_MIN*60; // floor to 30min, back up a bit
+  }
+  function buildGuide(){
+    gFiltered = ALL.filter(function(i){
+      return i.id && EPG[i.id] && EPG[i.id].length && passFilters(i);
+    }).sort(function(a,b){ return a.name.localeCompare(b.name); });
+    $("guideCount").textContent = gFiltered.length.toLocaleString() + " channels";
+    $("guideEmpty").style.display = gFiltered.length ? "none" : "";
+    $("guide").style.display = gFiltered.length ? "" : "none";
+    gShown = 0;
+    renderGuideShell();
+    renderGuideRows();
+  }
+  function renderGuideShell(){
+    var start = gridStart();
+    var totalMin = WINDOW_MIN + PAST_MIN;
+    var trackW = totalMin * PPM;
+    var ruler = '<div class="ruler"><div class="corner">Channel</div>'+
+      '<div class="ruler-track" style="width:'+trackW+'px">';
+    for(var m=0; m<=totalMin; m+=30){
+      ruler += '<div class="tick" style="left:'+(m*PPM)+'px">'+hhmm(start + m*60)+'</div>';
+    }
+    ruler += '</div></div>';
+    $("guide").innerHTML =
+      '<div class="guide-inner" style="min-width:'+(LABEL_W+trackW)+'px">'+ ruler +
+      '<div class="grow" id="guideBody"></div>'+
+      '<div class="nowbar" id="nowbar"></div></div>';
+    positionNowBar();
+  }
+  function positionNowBar(){
+    var bar = $("nowbar"); if(!bar) return;
+    var start = gridStart();
+    var x = LABEL_W + (Date.now()/1000 - start)/60 * PPM;
+    bar.style.left = x + "px";
+    var body = $("guideBody");
+    bar.style.height = (36 + (body ? body.offsetHeight : 0)) + "px";
+    bar.style.top = "0px";
+  }
+  function renderGuideRows(){
+    var start = gridStart(), end = start + (WINDOW_MIN+PAST_MIN)*60;
+    var trackW = (WINDOW_MIN+PAST_MIN)*PPM;
+    var body = $("guideBody");
+    var frag = document.createDocumentFragment();
+    var stop = Math.min(gShown + G_PAGE, gFiltered.length);
+    for(var i=gShown;i<stop;i++){
+      var it = gFiltered[i];
+      var row = document.createElement("div");
+      row.className = "guide-row";
+      var label = '<div class="guide-label" style="width:'+LABEL_W+'px">'+
+        '<div class="lg">'+logoHtml(it)+'</div><div class="nm">'+escapeHtml(it.name)+'</div></div>';
+      var track = '<div class="guide-track" style="width:'+trackW+'px">';
+      var progs = EPG[it.id], now = Date.now()/1000;
+      for(var k=0;k<progs.length;k++){
+        var p = progs[k];
+        if(p[1] <= start || p[0] >= end) continue;
+        var s = Math.max(p[0], start), e = Math.min(p[1], end);
+        var left = (s-start)/60*PPM, w = (e-s)/60*PPM;
+        if(w < 3) continue;
+        var isNow = p[0] <= now && now < p[1];
+        track += '<div class="prog'+(isNow?' now':'')+'" style="left:'+left+'px;width:'+(w-3)+'px" '+
+          'title="'+escapeHtml(p[2])+' ('+hhmm(p[0])+'–'+hhmm(p[1])+')">'+
+          '<div class="pt">'+escapeHtml(p[2])+'</div>'+
+          '<div class="ptime">'+hhmm(p[0])+'</div></div>';
+      }
+      track += '</div>';
+      row.innerHTML = label + track;
+      (function(item){ row.addEventListener("click", function(){ openPlayer(item); }); })(it);
+      frag.appendChild(row);
+    }
+    body.appendChild(frag);
+    gShown = stop;
+    $("guideMoreWrap").style.display = gShown < gFiltered.length ? "" : "none";
+    positionNowBar();
+  }
+
+  // ---- player ---------------------------------------------------------
+  function proxUrl(item){
+    var u = "/proxy?url=" + encodeURIComponent(item.url);
+    if(item.ua) u += "&ua=" + encodeURIComponent(item.ua);
+    if(item.ref) u += "&ref=" + encodeURIComponent(item.ref);
+    return u;
+  }
+  function geoHint(item){
+    var where = item.cc ? (flag(item.cc)+" "+(ccName[item.cc]||item.cc)) : "another country";
+    var vpn = item.cc && ccVpn[item.cc], cont = item.cc && ccCont[item.cc];
+    if(vpn){
+      var extra = (cont && cont !== vpn) ? " (closest to "+cont+")" : "";
+      return "This is a <b>"+where+"</b> channel and is likely <b>geo-locked</b>. "+
+        "In Opera, open the free built-in VPN, set the region to <b>"+vpn+"</b>"+extra+
+        ", then hit <b>Try again</b>.";
+    }
+    return "This channel may be <b>geo-locked</b> to its home country. In Opera, "+
+      "turn on the free built-in VPN, pick the closest region (Europe / Americas / "+
+      "Asia), then hit <b>Try again</b>.";
+  }
+  function openPlayer(item){
+    current = item; triedDirect = false;
+    $("pLogo").innerHTML = logoHtml(item);
+    $("pName").textContent = item.name;
+    var pr = $("pRegion");
+    if(item.cc){
+      pr.style.display = "";
+      pr.textContent = "📍 " + flag(item.cc) + " " + (ccName[item.cc]||item.cc) +
+        (ccVpn[item.cc] ? " · VPN: " + ccVpn[item.cc] : "");
+    } else { pr.style.display = "none"; }
+    $("modal").classList.add("open");
+    hideStatus();
+    updatePlayerGuide();
+    startPlayback(proxUrl(item), false);
+  }
+  function updatePlayerGuide(){
+    var box = $("pguide");
+    if(!current){ box.style.display="none"; return; }
+    var list = EPG[current.id];
+    if(!list || !list.length){ box.style.display="none"; box.innerHTML=""; return; }
+    var info = nowInfo(current.id);
+    var html = "";
+    if(info && info.now){
+      html += '<div class="pnow">▶ '+escapeHtml(info.now[2])+'</div>'+
+        '<div class="ptimes">'+hhmm(info.now[0])+' – '+hhmm(info.now[1])+'</div>'+
+        '<div class="pbar"><span style="width:'+Math.round(info.prog*100)+'%"></span></div>';
+    }
+    var now = Date.now()/1000;
+    var upcoming = list.filter(function(p){ return p[0] > now; }).slice(0,5);
+    if(upcoming.length){
+      html += '<div class="upnext"><h4>Up next</h4>';
+      upcoming.forEach(function(p){
+        html += '<div class="un-item"><span class="t">'+hhmm(p[0])+'</span><span>'+escapeHtml(p[2])+'</span></div>';
+      });
+      html += '</div>';
+    }
+    box.innerHTML = html;
+    box.style.display = html ? "" : "none";
+  }
+  function startPlayback(src, isDirect){
+    var video = $("video");
+    teardownHls();
+    if(window.Hls && Hls.isSupported()){
+      hls = new Hls({ maxBufferLength: 20, manifestLoadingTimeOut: 15000,
+        manifestLoadingMaxRetry: 2, levelLoadingMaxRetry: 3 });
+      hls.loadSource(src);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, function(){ hideStatus(); video.play().catch(function(){}); });
+      hls.on(Hls.Events.ERROR, function(evt, data){
+        if(!data.fatal) return;
+        if(data.type === Hls.ErrorTypes.MEDIA_ERROR){
+          try{ hls.recoverMediaError(); return; }catch(e){}
+        }
+        if(!isDirect && !triedDirect && current){
+          triedDirect = true; startPlayback(current.url, true); return;
+        }
+        showStatus("This stream isn't responding right now.",
+                   current ? geoHint(current) : null);
+      });
+    } else if(video.canPlayType("application/vnd.apple.mpegurl")){
+      video.src = src;
+      video.addEventListener("loadedmetadata", hideStatus, {once:true});
+      video.addEventListener("error", function(){
+        if(!isDirect && !triedDirect && current){
+          triedDirect = true; video.src = current.url; video.play().catch(function(){});
+        } else showStatus("This stream isn't responding right now.",
+                          current ? geoHint(current) : null);
+      }, {once:true});
+      video.play().catch(function(){});
+    } else {
+      showStatus("Your browser can't play HLS streams. Try Chrome, Edge, or Safari.");
+    }
+  }
+  function teardownHls(){ if(hls){ try{hls.destroy();}catch(e){} hls=null; } }
+  function closePlayer(){
+    $("modal").classList.remove("open");
+    teardownHls();
+    var v = $("video"); v.pause(); v.removeAttribute("src"); v.load();
+    current = null;
+  }
+  function showStatus(msg, hintHtml){
+    $("statusMsg").textContent = msg;
+    var h = $("vpnHint");
+    if(hintHtml){ h.innerHTML = hintHtml; h.style.display = ""; }
+    else { h.style.display = "none"; }
+    $("status").classList.add("show");
+  }
+  function hideStatus(){ $("status").classList.remove("show"); }
+
+  // ---- view switching -------------------------------------------------
+  function setView(v){
+    view = v;
+    $("tabDiscover").classList.toggle("active", v==="discover");
+    $("tabGuide").classList.toggle("active", v==="guide");
+    $("discover").style.display = v==="discover" ? "" : "none";
+    $("guideView").style.display = v==="guide" ? "" : "none";
+    applyFilters();
+  }
+
+  // ---- boot -----------------------------------------------------------
+  function fillFilters(){
+    var fc = $("fCat");
+    DATA.categories.forEach(function(c){
+      catName[c.id] = c.name;
+      var o = document.createElement("option"); o.value=c.id; o.textContent=c.name;
+      fc.appendChild(o);
+    });
+    var cc = $("fCc");
+    DATA.countries.forEach(function(c){
+      ccName[c.code] = c.name;
+      ccVpn[c.code] = c.vpn; ccCont[c.code] = c.cont;
+      var o = document.createElement("option");
+      o.value=c.code; o.textContent=flag(c.code)+" "+c.name;
+      cc.appendChild(o);
+    });
+  }
+  function setAdult(on){
+    nsfwOn = on;
+    localStorage.setItem("sleepytv_nsfw", on ? "1" : "0");
+    $("adultToggle").classList.toggle("on", on);
+    if(!DATA) return;
+    if(view==="discover"){ buildHero(); buildRails(); }
+    applyFilters();
+  }
+  function debounce(fn, ms){ var t; return function(){ clearTimeout(t); t=setTimeout(fn, ms); }; }
+
+  function loadEpg(){
+    fetch("/api/epg").then(function(r){ return r.json(); }).then(function(d){
+      EPG = d.epg || {};
+      $("guideNote").textContent = "Live schedules for " +
+        Object.keys(EPG).length.toLocaleString() +
+        " channels (Plex, Pluto, Roku, Samsung & more). Other channels stream 24/7 without a guide.";
+      refreshEpgLines(); updateHeroNow(); updatePlayerGuide();
+      if(view==="guide") buildGuide();
+    }).catch(function(){ /* EPG optional */ });
+  }
+
+  function init(){
+    if(nsfwOn) $("adultToggle").classList.add("on");
+    if(localStorage.getItem("sleepytv_tip") !== "hidden") $("tip").style.display = "";
+    $("tipClose").addEventListener("click", function(){
+      $("tip").style.display = "none";
+      localStorage.setItem("sleepytv_tip", "hidden");
+    });
+    fetch("/api/data").then(function(r){ return r.json(); }).then(function(d){
+      DATA = d; ALL = d.channels || [];
+      if(d.error){
+        $("loading").innerHTML = "⚠️ Couldn't load channel data:<br><br>"+
+          escapeHtml(d.error)+"<br><br>Check your internet connection and restart <code>app.py</code>.";
+        return;
+      }
+      fillFilters();
+      $("loading").style.display = "none";
+      $("discover").style.display = "";
+      buildHero(); buildRails(); applyFilters();
+      loadEpg();
+    }).catch(function(e){
+      $("loading").innerHTML = "⚠️ Could not reach the local server.<br>"+escapeHtml(String(e));
+    });
+
+    $("q").addEventListener("input", debounce(applyFilters, 180));
+    $("fCat").addEventListener("change", applyFilters);
+    $("fCc").addEventListener("change", applyFilters);
+    $("moreBtn").addEventListener("click", renderMore);
+    $("guideMoreBtn").addEventListener("click", renderGuideRows);
+    $("tabDiscover").addEventListener("click", function(){ setView("discover"); });
+    $("tabGuide").addEventListener("click", function(){ setView("guide"); });
+    $("adultToggle").addEventListener("click", function(){ setAdult(!nsfwOn); });
+    $("closeBtn").addEventListener("click", closePlayer);
+    $("retryBtn").addEventListener("click", function(){
+      if(current){ triedDirect=false; hideStatus(); startPlayback(proxUrl(current), false); }
+    });
+    $("modal").addEventListener("click", function(e){ if(e.target === $("modal")) closePlayer(); });
+    document.addEventListener("keydown", function(e){ if(e.key === "Escape") closePlayer(); });
+
+    // keep "now" info fresh
+    setInterval(function(){
+      refreshEpgLines(); updateHeroNow();
+      if($("modal").classList.contains("open")) updatePlayerGuide();
+      if(view==="guide") positionNowBar();
+    }, 30000);
+  }
+  init();
+})();
+</script>
+</body>
+</html>

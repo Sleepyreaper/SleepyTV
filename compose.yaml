@@ -1,0 +1,87 @@
+# SleepyTV + Jellyfin — one-stop media stack for Dockge (sleepycore)
+# ---------------------------------------------------------------------------
+# Jellyfin is the unified front-end (your local media from \\sleepynas plus Live
+# TV + Guide). SleepyTV is the Live-TV backend: Jellyfin pulls its channel list
+# from SleepyTV's /playlist.m3u and its guide from /epg.xml.
+#
+# Prereqs on sleepycore:
+#   • Docker + Dockge
+#   • nvidia-container-toolkit installed (for Jellyfin NVENC transcoding)
+#   • cifs-utils on the host (for the SMB media mount)
+#   • a .env file next to this compose (copy .env.example) with your NAS creds
+#
+# After it's up, configure Jellyfin's Live TV (see README → "Jellyfin setup").
+services:
+  sleepytv:
+    build: .
+    image: sleepytv:latest
+    container_name: sleepytv
+    restart: unless-stopped
+    ports:
+      - "8080:8080"          # browser UI + M3U/XMLTV/proxy; add to your dashboard
+    environment:
+      - SLEEPYTV_CACHE_DIR=/cache
+    volumes:
+      - sleepytv_cache:/cache
+    healthcheck:
+      # green once the channel list has loaded (uses python — already in the image)
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 60s
+    labels:
+      # Homepage (gethomepage.dev) auto-discovery tile — ignored if you don't use it
+      - homepage.group=Media
+      - homepage.name=SleepyTV
+      - homepage.icon=jellyfin.png
+      - homepage.href=http://sleepycore:8080
+      - homepage.description=Free live TV guide (IPTV) + Jellyfin tuner
+
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    restart: unless-stopped
+    ports:
+      - "8096:8096"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    # NVIDIA GPU passthrough for hardware transcoding (needs nvidia-container-toolkit)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - jellyfin_config:/config
+      - jellyfin_cache:/cache
+      - media:/media:ro       # your Plex library, read-only
+    depends_on:
+      - sleepytv
+    labels:
+      # Homepage (gethomepage.dev) auto-discovery tile — ignored if you don't use it
+      - homepage.group=Media
+      - homepage.name=Jellyfin
+      - homepage.icon=jellyfin.png
+      - homepage.href=http://sleepycore:8096
+      - homepage.description=Movies, shows & live TV
+      # Optional live widget — uncomment and add a Jellyfin API key:
+      # - homepage.widget.type=jellyfin
+      # - homepage.widget.url=http://jellyfin:8096
+      # - homepage.widget.key=YOUR_JELLYFIN_API_KEY
+
+volumes:
+  sleepytv_cache:
+  jellyfin_config:
+  jellyfin_cache:
+  # SMB/CIFS mount of \\sleepynas\PlexMediaServer. Credentials come from .env
+  # (you fill those in — they are never stored in this file).
+  media:
+    driver: local
+    driver_opts:
+      type: cifs
+      o: "username=${NAS_USER},password=${NAS_PASS},uid=1000,gid=1000,ro,iocharset=utf8,vers=3.0"
+      device: "//sleepynas/PlexMediaServer"
