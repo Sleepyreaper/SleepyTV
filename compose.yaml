@@ -88,4 +88,7 @@ volumes:
     driver_opts:
       type: cifs
       o: "username=${NAS_USER},password=${NAS_PASS},uid=1000,gid=1000,ro,iocharset=utf8,vers=3.0"
-      device: "//sleepynas/PlexMediaServer"
+      # Use the NAS *IP*, not its hostname — the CIFS mount is done by the host
+      # kernel and doesn't use Docker DNS or your hosts file, so "sleepynas"
+      # won't resolve here. Override NAS_HOST in .env if the IP ever changes.
+      device: "//${NAS_HOST:-192.168.1.116}/PlexMediaServer"
