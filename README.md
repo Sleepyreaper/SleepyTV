@@ -60,6 +60,23 @@ only a handful have a live stream entry (the rest are removed/blocklisted
 upstream). Those that exist are hidden until you flip the **🔞 18+** toggle, and
 your choice is remembered in the browser.
 
+## "Known working" channels
+
+Public IPTV is flaky, so SleepyTV **probes every stream from the server itself**
+(the same box Jellyfin/your browser fetch from) and marks which ones actually
+respond — this catches dead links, 403 geo-blocks, DNS failures and timeouts, so
+"working" means "will play *for you*." The scan runs in the background
+(guide-backed channels first), refreshes every few hours, and is cached.
+
+- In the **UI**: a **✅ Working** toggle (show only verified channels), a green
+  **✓ LIVE** badge on verified cards, and a **"✅ Working"** rail.
+- For **Jellyfin**: point the tuner at **`/playlist.m3u?working=1`** for a
+  known-good lineup (combine filters, e.g. `?working=1&epg=1`).
+- Disable the probing entirely with env `SLEEPYTV_HEALTHCHECK=0`.
+
+> First scan takes a few minutes to cover all ~12k streams; the guide-backed
+> ~940 are probed first so the good stuff lights up quickly.
+
 ## Watching geo-locked channels (Opera's free VPN)
 
 These are free, public streams, but many are **geo-locked to their home country**
@@ -104,8 +121,9 @@ Delete `data_cache.json` / `epg_cache.json` any time to force a fresh pull.
 | `/` | The TV-guide UI |
 | `/api/data` | Merged channel list (gzipped JSON) |
 | `/api/epg` | Program schedules `{channelId: [[start, stop, title], …]}` |
-| `/playlist.m3u` | **M3U tuner** for Jellyfin/Plex/etc. Filters: `?epg=1` `?cat=news,sports` `?country=US,UK` `?nsfw=1` `?proxy=1` |
+| `/playlist.m3u` | **M3U tuner** for Jellyfin/Plex/etc. Filters: `?working=1` `?epg=1` `?cat=news,sports` `?country=US,UK` `?nsfw=1` `?proxy=1` |
 | `/epg.xml` | **XMLTV guide** matching the playlist's `tvg-id`s |
+| `/api/health` | Which streams are reachable from the server (`{ok:[…], working, scanning}`) |
 | `/proxy?url=…` | CORS-friendly HLS proxy (rewrites playlists, streams segments) |
 | `/healthz` | Health probe — `200` once channels are loaded (used by the container healthcheck) |
 

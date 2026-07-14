@@ -52,6 +52,9 @@ CACHE_FILE = os.path.join(CACHE_DIR, "data_cache.json")
 CACHE_TTL = 12 * 3600  # refresh the channel list at most twice a day
 EPG_CACHE_FILE = os.path.join(CACHE_DIR, "epg_cache.json")
 EPG_TTL = 3 * 3600     # program schedules change through the day
+HEALTH_CACHE_FILE = os.path.join(CACHE_DIR, "health_cache.json")
+HEALTH_TTL = 6 * 3600  # re-probe which streams are alive every few hours
+HEALTH_ENABLED = os.environ.get("SLEEPYTV_HEALTHCHECK", "1").lower() not in ("0", "false", "no")
 API = "https://iptv-org.github.io/api"
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -71,6 +74,11 @@ DATA_OBJ = None            # raw merged data (for M3U/XMLTV generation)
 EPG_BYTES = None           # gzipped JSON payload for /api/epg
 EPG_READY = threading.Event()
 EPG_OBJ = None             # raw {channel_id: [[s, e, title], ...]}
+HEALTH = {}                # stream url -> bool (reachable from this server)
+HEALTH_TS = 0              # unix time of the last completed scan
+HEALTH_SCANNING = False    # True while a probe pass is actively running
+HEALTH_LOCK = threading.Lock()
+HEALTH_READY = threading.Event()  # set after the first (priority) batch is probed
 
 
 def _fetch_json(name):
@@ -392,9 +400,12 @@ def filter_channels(qs):
     countries = set(filter(None, (qs.get("country", [""])[0]).split(",")))
     epg_only = (qs.get("epg", ["0"])[0]) in ("1", "true", "yes")
     show_nsfw = (qs.get("nsfw", ["0"])[0]) in ("1", "true", "yes")
+    working_only = (qs.get("working", ["0"])[0]) in ("1", "true", "yes")
     out = []
     for it in items:
         if it.get("nsfw") and not show_nsfw:
+            continue
+        if working_only and not HEALTH.get(it["url"]):
             continue
         if epg_only and not (it.get("id") and it["id"] in (EPG_OBJ or {})):
             continue
@@ -473,6 +484,111 @@ def build_xmltv():
 
 
 # --------------------------------------------------------------------------
+# Stream health checks
+# --------------------------------------------------------------------------
+# Probe each stream *from this server* so "working" means "reachable from where
+# Jellyfin/your browser will actually fetch it" (catches dead links, 403 geo
+# blocks, DNS failures, timeouts). Results power a "known working" filter in the
+# UI and the ?working=1 option on /playlist.m3u.
+def check_stream(url, ua, ref):
+    headers = {"User-Agent": ua or BROWSER_UA}
+    if ref:
+        headers["Referer"] = ref
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=8, context=SSL_CTX) as r:
+            if (getattr(r, "status", 200) or 200) >= 400:
+                return False
+            head = r.read(1024)
+    except Exception:
+        return False
+    low = url.lower().split("?")[0]
+    if ".m3u8" in low or head[:7] == b"#EXTM3U":
+        return b"#EXT" in head          # a real HLS playlist
+    return len(head) > 0                 # some other media that responded
+
+
+def save_health():
+    try:
+        ok = [u for u, v in HEALTH.items() if v]
+        with open(HEALTH_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"ts": int(time.time()), "ok": ok}, f)
+    except Exception as e:
+        print("[health] could not write cache: %s" % e)
+
+
+def load_health_cache():
+    global HEALTH_TS
+    if not os.path.exists(HEALTH_CACHE_FILE):
+        return False
+    try:
+        with open(HEALTH_CACHE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        with HEALTH_LOCK:
+            for u in data.get("ok", []):
+                HEALTH[u] = True
+        HEALTH_TS = data.get("ts", 0)
+        print("[health] loaded %d known-working streams from cache" % len(HEALTH))
+        HEALTH_READY.set()
+        return time.time() - HEALTH_TS < HEALTH_TTL
+    except Exception as e:
+        print("[health] cache unreadable (%s)" % e)
+        return False
+
+
+def _probe_batch(items):
+    def work(it):
+        return it["url"], check_stream(it["url"], it.get("ua"), it.get("ref"))
+    with ThreadPoolExecutor(max_workers=25) as pool:
+        for url, ok in pool.map(work, items):
+            with HEALTH_LOCK:
+                HEALTH[url] = ok
+
+
+def health_scan():
+    global HEALTH_SCANNING
+    HEALTH_SCANNING = True
+    try:
+        items = (DATA_OBJ or {}).get("channels", [])
+        epg = EPG_OBJ or {}
+        # probe the guide-backed channels first (the premium lineup), then the rest
+        priority = [it for it in items if it.get("id") and it["id"] in epg]
+        rest = [it for it in items if not (it.get("id") and it["id"] in epg)]
+        print("[health] probing %d streams (%d guide-backed first)..."
+              % (len(items), len(priority)))
+        _probe_batch(priority)
+        HEALTH_READY.set()
+        save_health()
+        _probe_batch(rest)
+        save_health()
+        with HEALTH_LOCK:
+            working = sum(1 for v in HEALTH.values() if v)
+        print("[health] scan done: %d/%d streams reachable" % (working, len(HEALTH)))
+    finally:
+        HEALTH_SCANNING = False
+
+
+def health_worker():
+    if not HEALTH_ENABLED:
+        HEALTH_READY.set()
+        print("[health] disabled (SLEEPYTV_HEALTHCHECK=0)")
+        return
+    global HEALTH_TS
+    fresh = load_health_cache()
+    DATA_READY.wait()
+    EPG_READY.wait()
+    while True:
+        if not fresh:
+            try:
+                health_scan()
+                HEALTH_TS = time.time()
+            except Exception as e:
+                print("[health] scan error: %s" % e)
+        fresh = False
+        time.sleep(HEALTH_TTL)
+
+
+# --------------------------------------------------------------------------
 # HLS stream proxy
 # --------------------------------------------------------------------------
 def _proxify(url, ua, ref):
@@ -535,6 +651,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_data()
         if path == "/api/epg":
             return self._serve_epg()
+        if path == "/api/health":
+            return self._serve_health_data()
         if path == "/playlist.m3u":
             return self._serve_m3u(urllib.parse.parse_qs(parsed.query))
         if path == "/epg.xml":
@@ -575,9 +693,26 @@ class Handler(BaseHTTPRequestHandler):
         }).encode("utf-8")
         self._send(200 if ready else 503, body, "application/json; charset=utf-8")
 
+    def _serve_health_data(self):
+        DATA_READY.wait()
+        with HEALTH_LOCK:
+            ok = [u for u, v in HEALTH.items() if v]
+            checked = len(HEALTH)
+        body = json.dumps({
+            "ok": ok,
+            "working": len(ok),
+            "checked": checked,
+            "scanning": HEALTH_SCANNING,
+            "enabled": HEALTH_ENABLED,
+            "ts": HEALTH_TS,
+        }).encode("utf-8")
+        self._serve_gzip_json(gzip.compress(body))
+
     def _serve_m3u(self, qs):
         DATA_READY.wait()
         EPG_READY.wait()  # so ?epg=1 filtering works on first hit
+        if (qs.get("working", ["0"])[0]) in ("1", "true", "yes"):
+            HEALTH_READY.wait(timeout=120)  # first working request waits for the priority scan
         use_proxy = (qs.get("proxy", ["0"])[0]) in ("1", "true", "yes")
         host = self.headers.get("Host")
         items = filter_channels(qs)
@@ -674,12 +809,13 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     os.makedirs(CACHE_DIR, exist_ok=True)
     threading.Thread(target=warm_data, daemon=True).start()
+    threading.Thread(target=health_worker, daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     url = "http://localhost:%d" % PORT
     print("=" * 56)
     print(" SleepyTV is running -> %s" % url)
     print(" Live-TV backend for Jellyfin/Plex/etc:")
-    print("   M3U tuner : %s/playlist.m3u  (try ?epg=1)" % url)
+    print("   M3U tuner : %s/playlist.m3u  (try ?epg=1 or ?working=1)" % url)
     print("   XMLTV EPG : %s/epg.xml" % url)
     print(" (loading channel data in the background...)")
     print(" Press Ctrl+C to stop.")

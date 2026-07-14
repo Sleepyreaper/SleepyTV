@@ -70,6 +70,11 @@
   .adult.on .sw{background:var(--hot); border-color:var(--hot)}
   .adult.on .sw::after{left:18px; background:#fff}
   .adult.on{color:var(--hot)}
+  #workingToggle.on{color:var(--live)}
+  #workingToggle.on .sw{background:var(--live); border-color:var(--live)}
+  .card .sub .vok{color:var(--live); font-weight:700}
+  .badge.ok{color:#0b1020; background:rgba(61,220,132,.95);
+    display:inline-flex; align-items:center; gap:4px}
 
   /* Layout */
   main{max-width:1500px; margin:0 auto; padding:22px 20px 80px}
@@ -318,6 +323,9 @@
     </div>
     <select id="fCat"><option value="">All categories</option></select>
     <select id="fCc"><option value="">All countries</option></select>
+    <label class="adult" id="workingToggle" title="Show only channels verified reachable from the server">
+      <span class="sw"></span><span>✅ Working</span>
+    </label>
     <label class="adult" id="adultToggle" title="Show adult (18+) channels">
       <span class="sw"></span><span>🔞 18+</span>
     </label>
@@ -347,6 +355,7 @@
     </div>
     <div class="hero" id="hero"></div>
     <div id="rails"></div>
+    <div class="epgnote" id="healthNote" style="display:none"></div>
     <div class="section-title" id="browseTitle">📺 All channels</div>
     <div class="grid" id="grid"></div>
     <div class="more" id="moreWrap" style="display:none">
@@ -417,6 +426,8 @@
   var hls = null, current = null, triedDirect = false;
   var view = "discover";
   var nsfwOn = localStorage.getItem("sleepytv_nsfw") === "1";
+  var workingOn = localStorage.getItem("sleepytv_working") === "1";
+  var WORKING = new Set(), workingRailBuilt = false;
 
   var $ = function(id){ return document.getElementById(id); };
 
@@ -465,9 +476,11 @@
     var el = document.createElement("div");
     el.className = "card";
     if(item.id) el.setAttribute("data-cid", item.id);
+    el.setAttribute("data-url", item.url);
     var q = item.q ? '<span class="badge q">'+item.q+'</span>' : '<span></span>';
     var right = item.nsfw ? '<span class="badge adult">18+</span>'
-                          : '<span class="badge live"><i></i>LIVE</span>';
+              : (WORKING.has(item.url) ? '<span class="badge ok">✓ LIVE</span>'
+                                       : '<span class="badge live"><i></i>LIVE</span>');
     var catTxt = (item.cats && item.cats.length)
       ? '<span class="chip">'+ (catName[item.cats[0]]||item.cats[0]) +'</span>' : "";
     var ccTxt = item.cc ? flag(item.cc) + " " + (ccName[item.cc]||item.cc) : "🌐 Worldwide";
@@ -587,6 +600,12 @@
   }
   function buildRails(){
     var wrap = $("rails"); wrap.innerHTML = "";
+    if(WORKING.size){
+      var wk = ALL.filter(function(i){ return visible(i) && i.logo && WORKING.has(i.url); });
+      shuffle(wk);
+      if(wk.length >= 4)
+        railSection(wrap, "live", "✅ Working", "Known working — verified live from your server", wk.slice(0,18));
+    }
     var show = buildShowcase();
     if(show.length >= 3)
       railSection(wrap, "hot", "⭐ Showcase", "Free TV that just works", show);
@@ -602,10 +621,14 @@
     var cat = $("fCat").value, cc = $("fCc").value;
     var term = $("q").value.trim().toLowerCase();
     if(!visible(i)) return false;
+    if(workingOn && !WORKING.has(i.url)) return false;
     if(cat && i.cats.indexOf(cat) === -1) return false;
     if(cc && i.cc !== cc) return false;
     if(term && i.name.toLowerCase().indexOf(term) === -1) return false;
     return true;
+  }
+  function isSearching(){
+    return !!($("q").value.trim() || $("fCat").value || $("fCc").value);
   }
   function applyFilters(){
     if(view === "guide") return buildGuide();
@@ -855,6 +878,44 @@
   }
   function debounce(fn, ms){ var t; return function(){ clearTimeout(t); t=setTimeout(fn, ms); }; }
 
+  function refreshWorking(){
+    document.querySelectorAll(".card[data-url]").forEach(function(el){
+      if(el.querySelector(".badge.adult")) return;      // leave 18+ badge alone
+      var ok = WORKING.has(el.getAttribute("data-url"));
+      var b = el.querySelector(".thumb .badges .badge.live, .thumb .badges .badge.ok");
+      if(b) b.outerHTML = ok ? '<span class="badge ok">✓ LIVE</span>'
+                             : '<span class="badge live"><i></i>LIVE</span>';
+    });
+  }
+  function updateHealthNote(d){
+    var el = $("healthNote"); if(!el) return;
+    if(!d || !d.enabled || !d.checked){ el.style.display = "none"; return; }
+    el.style.display = "";
+    el.innerHTML = "✅ <b>" + d.working.toLocaleString() + "</b> channels verified reachable "+
+      "from your server" + (d.scanning ? " · still checking the rest…" : "") +
+      ". Flip <b>✅ Working</b> up top to show only these.";
+  }
+  function setWorking(on){
+    workingOn = on;
+    localStorage.setItem("sleepytv_working", on ? "1" : "0");
+    $("workingToggle").classList.toggle("on", on);
+    applyFilters();
+  }
+  function loadHealth(){
+    fetch("/api/health").then(function(r){ return r.json(); }).then(function(d){
+      if(!d.enabled) return;
+      WORKING = new Set(d.ok || []);
+      updateHealthNote(d);
+      refreshWorking();
+      // build the "known working" rail once we first have data (avoids reshuffle churn)
+      if(!workingRailBuilt && WORKING.size && view === "discover" && !isSearching()){
+        buildRails(); workingRailBuilt = true;
+      }
+      if(workingOn) applyFilters();               // keep the filtered view current
+      if(d.scanning) setTimeout(loadHealth, 30000); // poll while the scan runs
+    }).catch(function(){});
+  }
+
   function loadEpg(){
     fetch("/api/epg").then(function(r){ return r.json(); }).then(function(d){
       EPG = d.epg || {};
@@ -868,6 +929,7 @@
 
   function init(){
     if(nsfwOn) $("adultToggle").classList.add("on");
+    if(workingOn) $("workingToggle").classList.add("on");
     if(localStorage.getItem("sleepytv_tip") !== "hidden") $("tip").style.display = "";
     $("tipClose").addEventListener("click", function(){
       $("tip").style.display = "none";
@@ -884,7 +946,7 @@
       $("loading").style.display = "none";
       $("discover").style.display = "";
       buildHero(); buildRails(); applyFilters();
-      loadEpg();
+      loadEpg(); loadHealth();
     }).catch(function(e){
       $("loading").innerHTML = "⚠️ Could not reach the local server.<br>"+escapeHtml(String(e));
     });
@@ -897,6 +959,7 @@
     $("tabDiscover").addEventListener("click", function(){ setView("discover"); });
     $("tabGuide").addEventListener("click", function(){ setView("guide"); });
     $("adultToggle").addEventListener("click", function(){ setAdult(!nsfwOn); });
+    $("workingToggle").addEventListener("click", function(){ setWorking(!workingOn); });
     $("closeBtn").addEventListener("click", closePlayer);
     $("retryBtn").addEventListener("click", function(){
       if(current){ triedDirect=false; hideStatus(); startPlayback(proxUrl(current), false); }
