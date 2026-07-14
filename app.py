@@ -638,10 +638,15 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
-        if body:
+        if body and self.command != "HEAD":
             self.wfile.write(body)
 
     # -- routing ----------------------------------------------------------
+    def do_HEAD(self):
+        # Some clients (incl. Jellyfin's tuner/guide validation) probe with HEAD.
+        # Reuse the GET routing; _send and the proxy skip the body for HEAD.
+        self.do_GET()
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
@@ -789,6 +794,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Range", crange)
             self.send_header("Accept-Ranges", "bytes")
             self.end_headers()
+            if self.command == "HEAD":
+                return
             self.wfile.write(head)
             while True:
                 chunk = upstream.read(65536)
