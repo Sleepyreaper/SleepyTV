@@ -1,6 +1,7 @@
 # SleepyTV — generated caches (safe to delete / regenerated at runtime)
 data_cache.json
 epg_cache.json
+health_cache.json
 cache/
 
 # secrets — never commit real NAS credentials
